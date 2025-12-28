@@ -1,0 +1,700 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Love Hsiung Glamping | Luxury Guide</title>
+    
+    <!-- Libraries -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Custom Config for Tailwind -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            green: '#2C5F2D',
+                            gold: '#D4AF37',
+                            cream: '#F5F5DC',
+                            dark: '#1a3c1b'
+                        }
+                    },
+                    fontFamily: {
+                        serif: ['Georgia', 'serif'],
+                        sans: ['Helvetica', 'Arial', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Glassmorphism */
+        .glass {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        .glass-dark {
+            background: rgba(44, 95, 45, 0.9);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Pulsing Blue Dot for User */
+        .user-marker {
+            width: 20px;
+            height: 20px;
+            background-color: #3b82f6;
+            border: 3px solid white;
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+            animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        }
+        
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        }
+
+        /* Map Container */
+        #map { height: 100vh; width: 100vw; z-index: 1; background-color: #F5F5DC; }
+        
+        /* Loading Overlay */
+        #loading { z-index: 9999; }
+        
+        /* Controls */
+        #ui-layer { z-index: 1000; pointer-events: none; }
+        .interactive { pointer-events: auto; }
+
+        /* Custom Scrollbar for modals */
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body class="bg-brand-cream overflow-hidden text-gray-800 font-sans">
+
+    <!-- ==========================================
+         INSTRUCTIONS FOR THE BOSS (CALIBRATION)
+         ==========================================
+         1. Log in by adding ?admin=true to the URL.
+         2. Walk to a distinct landmark (e.g., The Main Gate).
+         3. Tap exactly on that landmark on the map image.
+         4. Click "Calibrate Point 1".
+         5. Walk to a second far-away point (e.g., Top of the hill).
+         6. Tap on the map image. Click "Calibrate Point 2".
+         7. Walk to a third point (e.g., The River/Side).
+         8. Tap on the map image. Click "Calibrate Point 3".
+         9. The system is now locked and ready for guests!
+    ========================================== -->
+
+    <!-- Loading Screen -->
+    <div id="loading" class="fixed inset-0 bg-brand-cream flex flex-col items-center justify-center transition-opacity duration-500">
+        <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-brand-green mb-4"></div>
+        <h1 class="text-2xl font-serif text-brand-green font-bold">Love Hsiung Glamping</h1>
+        <p class="text-brand-gold mt-2">Loading Map Data...</p>
+    </div>
+
+    <!-- The Map -->
+    <div id="map"></div>
+
+    <!-- UI Layer -->
+    <div id="ui-layer" class="fixed inset-0 flex flex-col justify-between p-4">
+        
+        <!-- Header -->
+        <div class="interactive flex justify-between items-start">
+            <div class="glass px-4 py-2 rounded-xl shadow-lg">
+                <h1 class="text-brand-green font-serif font-bold text-lg"><i class="fas fa-campground mr-2"></i>Love Hsiung</h1>
+            </div>
+            <div id="admin-badge" class="hidden glass-dark text-brand-gold px-3 py-1 rounded-full text-xs font-bold shadow-lg">
+                ADMIN MODE
+            </div>
+        </div>
+
+        <!-- Notifications / Guide Text -->
+        <div id="guide-notification" class="hidden interactive mx-auto mb-auto mt-4 glass-dark text-brand-cream px-6 py-4 rounded-2xl shadow-2xl max-w-md text-center transform transition-all duration-300 translate-y-[-20px] opacity-0">
+            <p id="guide-text" class="font-medium text-lg"></p>
+        </div>
+
+        <!-- Bottom Controls -->
+        <div class="interactive flex flex-col gap-3 items-end">
+            <!-- Center User Button -->
+            <button onclick="app.centerMap()" class="glass bg-white p-4 rounded-full shadow-xl text-brand-green hover:bg-gray-50 active:scale-95 transition">
+                <i class="fas fa-crosshairs fa-lg"></i>
+            </button>
+            
+            <!-- Admin Add Spot Button (Only visible in admin) -->
+            <button id="btn-add-spot" onclick="app.openAddSpotModal()" class="hidden glass-dark text-brand-gold p-4 rounded-full shadow-xl hover:bg-brand-green active:scale-95 transition">
+                <i class="fas fa-plus fa-lg"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL: Add Spot / Calibrate (Admin Only) -->
+    <div id="admin-modal" class="fixed inset-0 z-[2000] hidden bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center">
+        <div class="bg-white w-full sm:w-96 rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl animate-slide-up">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-serif font-bold text-brand-green">Map Editor</h2>
+                <button onclick="app.closeModal('admin-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times fa-lg"></i></button>
+            </div>
+            
+            <!-- Tabs -->
+            <div class="flex border-b mb-4">
+                <button onclick="app.switchTab('tab-spot')" id="btn-tab-spot" class="flex-1 pb-2 border-b-2 border-brand-green text-brand-green font-bold">Add Spot</button>
+                <button onclick="app.switchTab('tab-calib')" id="btn-tab-calib" class="flex-1 pb-2 border-b-2 border-transparent text-gray-500">Calibrate</button>
+            </div>
+
+            <!-- Tab: Add Spot -->
+            <div id="tab-spot" class="space-y-3">
+                <p class="text-xs text-gray-500 mb-2"><i class="fas fa-info-circle"></i> Stand at the location and tap "Add Current Location".</p>
+                <input type="text" id="spot-name" placeholder="Spot Name (e.g., BBQ Area)" class="w-full p-3 border rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-gold">
+                <textarea id="spot-speech" placeholder="Audio Guide Text (What the phone says)" class="w-full p-3 border rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-gold h-24"></textarea>
+                <label class="flex items-center gap-2 p-2 border rounded-xl cursor-pointer">
+                    <input type="checkbox" id="spot-mission" class="w-5 h-5 text-brand-green rounded">
+                    <span class="text-sm font-medium">Is Mission Spot? (Gamification)</span>
+                </label>
+                <button onclick="app.saveSpot()" class="w-full bg-brand-green text-white py-3 rounded-xl font-bold shadow-lg hover:bg-green-800">
+                    Save Location
+                </button>
+            </div>
+
+            <!-- Tab: Calibration -->
+            <div id="tab-calib" class="hidden space-y-4">
+                <div class="bg-yellow-50 p-3 rounded-lg border border-yellow-200 text-xs text-yellow-800">
+                    <strong>Instructions:</strong> Tap a location on the map image, then stand at that physical location and click a button below. You need 3 points.
+                </div>
+                <div id="calib-status" class="text-center font-bold text-brand-green text-sm">
+                    Points Set: 0/3
+                </div>
+                <div class="grid grid-cols-3 gap-2">
+                    <button onclick="app.setCalibration(0)" class="bg-gray-200 py-2 rounded-lg text-xs font-bold hover:bg-brand-gold hover:text-white transition">Point 1</button>
+                    <button onclick="app.setCalibration(1)" class="bg-gray-200 py-2 rounded-lg text-xs font-bold hover:bg-brand-gold hover:text-white transition">Point 2</button>
+                    <button onclick="app.setCalibration(2)" class="bg-gray-200 py-2 rounded-lg text-xs font-bold hover:bg-brand-gold hover:text-white transition">Point 3</button>
+                </div>
+                <button onclick="app.saveCalibration()" class="w-full bg-brand-gold text-white py-3 rounded-xl font-bold shadow-lg mt-2">
+                    Save Calibration
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: Mission Complete -->
+    <div id="mission-modal" class="fixed inset-0 z-[2000] hidden bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl p-6 text-center max-w-sm w-full animate-bounce-in">
+            <div class="w-20 h-20 bg-brand-gold rounded-full flex items-center justify-center mx-auto mb-4 text-white text-3xl shadow-xl">
+                <i class="fas fa-camera"></i>
+            </div>
+            <h2 class="text-2xl font-serif font-bold text-brand-green mb-2">Mission Spot!</h2>
+            <p id="mission-desc" class="text-gray-600 mb-6">Take a photo here to complete the challenge.</p>
+            <label class="block w-full bg-brand-green text-white py-3 rounded-xl font-bold shadow-lg cursor-pointer hover:bg-green-800 transition">
+                <i class="fas fa-camera mr-2"></i> Take Photo
+                <input type="file" accept="image/*" capture="environment" class="hidden" onchange="app.completeMission(this)">
+            </label>
+            <button onclick="app.closeModal('mission-modal')" class="mt-4 text-gray-400 text-sm underline">Skip</button>
+        </div>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        /**
+         * APP CONFIGURATION
+         */
+        const CONFIG = {
+            pantryId: '085e1276-c22a-4c58-9a2b-3b40d8fce6d9',
+            basketName: 'glamping_master_data',
+            imageMap: 'map.jpg', // Ensure this file exists in the same directory or provide URL
+            imageBounds: [[0,0], [1500, 1000]], // Virtual coordinate system for the image
+            proximityThreshold: 20, // meters
+            speakCooldown: 60000, // 1 minute before speaking same spot again
+        };
+
+        /**
+         * MATH ENGINE (Affine Transformation)
+         * Solves mapping between GPS (lat, lng) and Map (y, x)
+         */
+        class CalibrationEngine {
+            constructor() {
+                this.matrix = null;
+            }
+
+            // Solves Affine Matrix from 3 pairs of points: [lat, lng] -> [y, x]
+            solve(calibrationPoints) {
+                if (!calibrationPoints || calibrationPoints.length < 3) return false;
+
+                // Points: { lat, lng, mapY, mapX }
+                const src = calibrationPoints; 
+                
+                // We need to find Matrix M where P_map = M * P_gps
+                // P_map is [y, x, 1], P_gps is [lat, lng, 1]
+                // This is a linear system. We can use a simplified approach for 3 points.
+                // x' = A*lat + B*lng + C
+                // y' = D*lat + E*lng + F
+
+                // Helper to solve linear system of 3 equations
+                const solveSystem = (p1, p2, p3, v1, v2, v3) => {
+                    const A = p1.lat, B = p1.lng, C = 1;
+                    const D = p2.lat, E = p2.lng, F = 1;
+                    const G = p3.lat, H = p3.lng, I = 1;
+                    
+                    const det = A*(E*I - F*H) - B*(D*I - F*G) + C*(D*H - E*G);
+                    if (det === 0) return null; // Collinear points
+
+                    const A_ = (v1*(E*I - F*H) - B*(v2*I - F*v3) + C*(v2*H - E*v3)) / det;
+                    const B_ = (A*(v2*I - F*v3) - v1*(D*I - F*G) + C*(D*v3 - v2*G)) / det;
+                    const C_ = (A*(E*v3 - v2*H) - B*(D*v3 - v2*G) + v1*(D*H - E*G)) / det;
+                    
+                    return [A_, B_, C_];
+                };
+
+                // Solve for Map Y
+                const Y_coeffs = solveSystem(src[0], src[1], src[2], src[0].mapY, src[1].mapY, src[2].mapY);
+                // Solve for Map X
+                const X_coeffs = solveSystem(src[0], src[1], src[2], src[0].mapX, src[1].mapX, src[2].mapX);
+
+                if (!Y_coeffs || !X_coeffs) return false;
+
+                this.matrix = {
+                    y: Y_coeffs, // [A, B, C] for y = A*lat + B*lng + C
+                    x: X_coeffs  // [D, E, F] for x = D*lat + E*lng + F
+                };
+                return true;
+            }
+
+            transform(lat, lng) {
+                if (!this.matrix) return null;
+                const y = this.matrix.y[0] * lat + this.matrix.y[1] * lng + this.matrix.y[2];
+                const x = this.matrix.x[0] * lat + this.matrix.x[1] * lng + this.matrix.x[2];
+                return [y, x];
+            }
+        }
+
+        /**
+         * MAIN APP CONTROLLER
+         */
+        const app = {
+            map: null,
+            isAdmin: false,
+            data: { calibration: [], spots: [] },
+            userMarker: null,
+            lastClickedMapPoint: null, // [lat, lng] in map local coords
+            currentGps: null,
+            engine: new CalibrationEngine(),
+            visitedSpots: new Set(),
+            watchId: null,
+
+            init: async () => {
+                // Check Admin Mode
+                const urlParams = new URLSearchParams(window.location.search);
+                app.isAdmin = urlParams.get('admin') === 'true';
+
+                // UI Setup
+                if (app.isAdmin) {
+                    document.getElementById('admin-badge').classList.remove('hidden');
+                    document.getElementById('btn-add-spot').classList.remove('hidden');
+                }
+
+                // Initialize Map
+                app.initMap();
+
+                // Fetch Data
+                await app.fetchData();
+
+                // Remove Loader
+                document.getElementById('loading').classList.add('opacity-0', 'pointer-events-none');
+
+                // Start Tracking
+                app.startTracking();
+            },
+
+            initMap: () => {
+                // Initialize Leaflet
+                // Use a simple CRS since we are using image coordinates
+                app.map = L.map('map', {
+                    crs: L.CRS.Simple,
+                    minZoom: -1,
+                    maxZoom: 2,
+                    zoomControl: false,
+                    attributionControl: false
+                });
+
+                // Add Image Overlay
+                // Image covers the bounds defined in config
+                const bounds = CONFIG.imageBounds;
+                L.imageOverlay(CONFIG.imageMap, bounds).addTo(app.map);
+                app.map.fitBounds(bounds);
+
+                // Click Listener (For Admin)
+                app.map.on('click', (e) => {
+                    if (app.isAdmin) {
+                        app.lastClickedMapPoint = e.latlng; // contains lat (y), lng (x) in map space
+                        app.openAddSpotModal(true);
+                    }
+                });
+            },
+
+            fetchData: async () => {
+                try {
+                    const url = `https://getpantry.cloud/apiv1/pantry/${CONFIG.pantryId}/basket/${CONFIG.basketName}`;
+                    const res = await fetch(url);
+                    if (res.ok) {
+                        const json = await res.json();
+                        app.data = json;
+                        
+                        // Initialize Engine if calibration exists
+                        if (app.data.calibration && app.data.calibration.length === 3) {
+                            const success = app.engine.solve(app.data.calibration);
+                            if(success) console.log("Calibration Engine Started");
+                        } else if (app.isAdmin) {
+                            alert("Calibration Needed! Please set 3 reference points.");
+                        }
+
+                        // Render Spots
+                        app.renderSpots();
+                    } else {
+                        // Init new basket if 404
+                        app.data = { calibration: [], spots: [] };
+                    }
+                } catch (e) {
+                    console.error("Fetch Error", e);
+                    alert("Offline mode or Pantry Error.");
+                }
+            },
+
+            saveData: async () => {
+                try {
+                    const url = `https://getpantry.cloud/apiv1/pantry/${CONFIG.pantryId}/basket/${CONFIG.basketName}`;
+                    await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(app.data)
+                    });
+                    return true;
+                } catch (e) {
+                    alert("Failed to save data.");
+                    return false;
+                }
+            },
+
+            renderSpots: () => {
+                // Clear existing markers (except user)
+                app.map.eachLayer((layer) => {
+                    if (layer.options.id === 'spot-marker') {
+                        app.map.removeLayer(layer);
+                    }
+                });
+
+                app.data.spots.forEach(spot => {
+                    // Determine color based on mission status or visited
+                    let color = spot.isMission ? '#D4AF37' : '#2C5F2D'; // Gold or Green
+                    if (spot.completed) color = '#D4AF37'; // Mission done
+
+                    const iconHtml = `<div style="background-color: ${color}; width: 24px; height: 24px; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                        <i class="fas ${spot.isMission ? 'fa-star' : 'fa-map-marker-alt'} text-white" style="font-size: 12px;"></i>
+                    </div>`;
+
+                    const icon = L.divIcon({
+                        html: iconHtml,
+                        className: 'custom-div-icon',
+                        iconSize: [24, 24],
+                        iconAnchor: [12, 12]
+                    });
+
+                    // We need to project the Spot's REAL GPS to Map Coordinates using the engine
+                    // This ensures that if we re-calibrate, spots move to correct place
+                    let mapLoc;
+                    
+                    // If spot was created with Map coords directly (legacy), use them.
+                    // Otherwise transform GPS.
+                    if (spot.lat && spot.lng && app.engine.matrix) {
+                        const coords = app.engine.transform(spot.lat, spot.lng);
+                        if (coords) mapLoc = coords; // [y, x]
+                    } else if (spot.mapY && spot.mapX) {
+                        mapLoc = [spot.mapY, spot.mapX];
+                    }
+
+                    if (mapLoc) {
+                        const marker = L.marker(mapLoc, { icon: icon, id: 'spot-marker' }).addTo(app.map);
+                        marker.bindPopup(`
+                            <div class="text-center">
+                                <h3 class="font-bold text-brand-green">${spot.name}</h3>
+                                ${spot.isMission && !spot.completed ? `<button onclick="app.triggerMission('${spot.id}')" class="mt-2 bg-brand-gold text-white text-xs px-2 py-1 rounded">Start Mission</button>` : ''}
+                            </div>
+                        `);
+                    }
+                });
+            },
+
+            startTracking: () => {
+                if (!navigator.geolocation) {
+                    alert("Geolocation is not supported by your browser");
+                    return;
+                }
+
+                app.watchId = navigator.geolocation.watchPosition(
+                    (position) => {
+                        const lat = position.coords.latitude;
+                        const lng = position.coords.longitude;
+                        app.currentGps = { lat, lng };
+
+                        // Transform to Map Coords
+                        const mapCoords = app.engine.transform(lat, lng);
+
+                        if (mapCoords) {
+                            // Update User Marker
+                            if (!app.userMarker) {
+                                const userIcon = L.divIcon({
+                                    className: 'user-marker',
+                                    iconSize: [20, 20],
+                                    iconAnchor: [10, 10]
+                                });
+                                app.userMarker = L.marker(mapCoords, { icon: userIcon, zIndexOffset: 1000 }).addTo(app.map);
+                            } else {
+                                app.userMarker.setLatLng(mapCoords);
+                            }
+                            
+                            // Check Proximity
+                            app.checkProximity(lat, lng);
+                        }
+                    },
+                    (err) => console.warn("GPS Error", err),
+                    { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
+                );
+            },
+
+            checkProximity: (userLat, userLng) => {
+                if (!app.data.spots) return;
+
+                app.data.spots.forEach(spot => {
+                    // Calculate distance in Meters (Haversine)
+                    if (spot.lat && spot.lng) {
+                        const dist = app.getDistance(userLat, userLng, spot.lat, spot.lng);
+                        
+                        if (dist < CONFIG.proximityThreshold) {
+                            // Logic: Not visited recently?
+                            const now = Date.now();
+                            const lastVisit = app.visitedSpots.get(spot.id) || 0;
+
+                            if (now - lastVisit > CONFIG.speakCooldown) {
+                                // Trigger Event
+                                app.visitedSpots.set(spot.id, now);
+                                app.playAudio(spot.speech);
+                                app.showNotification(`Arrived at: ${spot.name}`);
+                                
+                                if (spot.isMission && !spot.completed) {
+                                    app.triggerMission(spot.id);
+                                }
+                            }
+                        }
+                    }
+                });
+            },
+
+            getDistance: (lat1, lon1, lat2, lon2) => {
+                const R = 6371e3; // metres
+                const φ1 = lat1 * Math.PI/180;
+                const φ2 = lat2 * Math.PI/180;
+                const Δφ = (lat2-lat1) * Math.PI/180;
+                const Δλ = (lon2-lon1) * Math.PI/180;
+                const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                        Math.cos(φ1) * Math.cos(φ2) *
+                        Math.sin(Δλ/2) * Math.sin(Δλ/2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                return R * c;
+            },
+
+            playAudio: (text) => {
+                if (!text) return;
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'en-US'; // Or 'zh-TW' if preferred
+                window.speechSynthesis.speak(utterance);
+            },
+
+            showNotification: (text) => {
+                const el = document.getElementById('guide-notification');
+                const p = document.getElementById('guide-text');
+                p.innerText = text;
+                el.classList.remove('hidden');
+                // Animation
+                requestAnimationFrame(() => {
+                    el.classList.remove('translate-y-[-20px]', 'opacity-0');
+                });
+                
+                setTimeout(() => {
+                    el.classList.add('translate-y-[-20px]', 'opacity-0');
+                    setTimeout(() => el.classList.add('hidden'), 300);
+                }, 4000);
+            },
+
+            // --- USER ACTIONS ---
+
+            centerMap: () => {
+                if (app.userMarker) {
+                    app.map.panTo(app.userMarker.getLatLng());
+                } else {
+                    alert("Waiting for GPS signal...");
+                }
+            },
+
+            triggerMission: (spotId) => {
+                app.currentMissionSpotId = spotId;
+                document.getElementById('mission-modal').classList.remove('hidden');
+            },
+
+            completeMission: (input) => {
+                if (input.files && input.files[0]) {
+                    // Simulate processing
+                    setTimeout(() => {
+                        app.closeModal('mission-modal');
+                        
+                        // Find spot and mark complete
+                        const spot = app.data.spots.find(s => s.id === app.currentMissionSpotId);
+                        if (spot) {
+                            spot.completed = true;
+                            // Save update
+                            app.saveData();
+                            // Re-render
+                            app.renderSpots();
+                            // Confetti effect or success sound could go here
+                            app.showNotification("Mission Complete! 🌟");
+                            app.playAudio("Great job! Mission accomplished.");
+                        }
+                    }, 1000);
+                }
+            },
+
+            // --- ADMIN ACTIONS ---
+
+            openAddSpotModal: (fromMapClick = false) => {
+                if(!fromMapClick && !app.isAdmin) return;
+                
+                // If opened via button (not click), reset last click
+                if (!fromMapClick) app.lastClickedMapPoint = null;
+
+                const modal = document.getElementById('admin-modal');
+                modal.classList.remove('hidden');
+                
+                // If just clicking, default to calibration tab if points are missing
+                if (app.data.calibration.length < 3) {
+                    app.switchTab('tab-calib');
+                } else {
+                    app.switchTab('tab-spot');
+                }
+
+                // Update Calib status text
+                document.getElementById('calib-status').innerText = `Points Set: ${app.data.calibration.length}/3`;
+            },
+
+            closeModal: (id) => {
+                document.getElementById(id).classList.add('hidden');
+            },
+
+            switchTab: (tabId) => {
+                document.getElementById('tab-spot').classList.add('hidden');
+                document.getElementById('tab-calib').classList.add('hidden');
+                document.getElementById(tabId).classList.remove('hidden');
+
+                const btnSpot = document.getElementById('btn-tab-spot');
+                const btnCalib = document.getElementById('btn-tab-calib');
+
+                if (tabId === 'tab-spot') {
+                    btnSpot.classList.replace('border-transparent', 'border-brand-green');
+                    btnSpot.classList.replace('text-gray-500', 'text-brand-green');
+                    btnCalib.classList.replace('border-brand-green', 'border-transparent');
+                    btnCalib.classList.replace('text-brand-green', 'text-gray-500');
+                } else {
+                    btnCalib.classList.replace('border-transparent', 'border-brand-green');
+                    btnCalib.classList.replace('text-gray-500', 'text-brand-green');
+                    btnSpot.classList.replace('border-brand-green', 'border-transparent');
+                    btnSpot.classList.replace('text-brand-green', 'text-gray-500');
+                }
+            },
+
+            saveSpot: async () => {
+                if (!app.currentGps) {
+                    alert("GPS Signal required to save a spot location accurately.");
+                    return;
+                }
+
+                const name = document.getElementById('spot-name').value;
+                const speech = document.getElementById('spot-speech').value;
+                const isMission = document.getElementById('spot-mission').checked;
+
+                if (!name) return alert("Name is required");
+
+                const newSpot = {
+                    id: 'spot_' + Date.now(),
+                    name,
+                    speech,
+                    isMission,
+                    completed: false,
+                    // Critical: Save REAL GPS
+                    lat: app.currentGps.lat,
+                    lng: app.currentGps.lng,
+                    // Optional: Save Map Coords if clicked for visual debugging
+                    mapY: app.lastClickedMapPoint ? app.lastClickedMapPoint.lat : null,
+                    mapX: app.lastClickedMapPoint ? app.lastClickedMapPoint.lng : null
+                };
+
+                app.data.spots.push(newSpot);
+                await app.saveData();
+                app.renderSpots();
+                app.closeModal('admin-modal');
+                // Clear inputs
+                document.getElementById('spot-name').value = '';
+                document.getElementById('spot-speech').value = '';
+            },
+
+            setCalibration: (index) => {
+                if (!app.lastClickedMapPoint) {
+                    alert("Please click on the MAP first to select the visual location.");
+                    return;
+                }
+                if (!app.currentGps) {
+                    alert("No GPS signal found. Cannot Calibrate.");
+                    return;
+                }
+
+                const point = {
+                    lat: app.currentGps.lat, // Real GPS Lat
+                    lng: app.currentGps.lng, // Real GPS Lng
+                    mapY: app.lastClickedMapPoint.lat, // Image Y (Leaflet Lat)
+                    mapX: app.lastClickedMapPoint.lng  // Image X (Leaflet Lng)
+                };
+
+                // Update or push
+                app.data.calibration[index] = point;
+                
+                // Feedback
+                document.getElementById('calib-status').innerText = `Points Set: ${app.data.calibration.filter(Boolean).length}/3`;
+                alert(`Point ${index + 1} Captured!`);
+            },
+
+            saveCalibration: async () => {
+                const validPoints = app.data.calibration.filter(p => p && p.lat && p.mapY);
+                if (validPoints.length !== 3) {
+                    alert("You must capture exactly 3 points.");
+                    return;
+                }
+                
+                await app.saveData();
+                app.engine.solve(app.data.calibration);
+                alert("Calibration Saved! The map is now synchronized.");
+                app.closeModal('admin-modal');
+            }
+        };
+
+        // Start App on Load
+        window.addEventListener('load', app.init);
+
+    </script>
+</body>
+</html>
+    
